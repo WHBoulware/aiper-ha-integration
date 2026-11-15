@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -17,6 +18,8 @@ from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import AiperApiClient, AiperApiError, AiperAuthError
+_LOGGER = logging.getLogger(__name__)
+
 from .const import (
     API_HOSTS,
     CONF_ACCESS_TOKEN,
@@ -42,6 +45,7 @@ class AiperConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
+        placeholders: dict[str, str] = {"reason": ""}
         if user_input is not None:
             device_id = str(uuid.uuid4()).upper()
             session = async_get_clientsession(self.hass)
@@ -53,12 +57,18 @@ class AiperConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             try:
                 await client.login(user_input[CONF_USERNAME], user_input[CONF_PASSWORD])
-            except AiperAuthError:
+            except AiperAuthError as err:
+                _LOGGER.warning("Aiper login rejected: %s", err)
                 errors["base"] = "invalid_auth"
-            except AiperApiError:
+                placeholders["reason"] = str(err)[:300]
+            except AiperApiError as err:
+                _LOGGER.warning("Aiper login failed: %s", err)
                 errors["base"] = "cannot_connect"
-            except Exception:  # noqa: BLE001
+                placeholders["reason"] = str(err)[:300]
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.exception("Unexpected error during Aiper login")
                 errors["base"] = "unknown"
+                placeholders["reason"] = f"{type(err).__name__}: {err}"[:300]
             else:
                 await self.async_set_unique_id(user_input[CONF_USERNAME].lower())
                 self._abort_if_unique_id_configured()
@@ -87,7 +97,12 @@ class AiperConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_APP_VERSION, default=DEFAULT_APP_VERSION): str,
             }
         )
-        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+        return self.async_show_form(
+            step_id="user",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders=placeholders,
+        )
 
     @staticmethod
     @callback

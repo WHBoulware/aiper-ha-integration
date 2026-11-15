@@ -107,7 +107,12 @@ class AiperApiClient:
             url, json=payload, headers=self._headers(), timeout=aiohttp.ClientTimeout(total=30)
         ) as resp:
             text = await resp.text()
+            _LOGGER.debug("Aiper %s -> HTTP %s: %s", endpoint, resp.status, text[:500])
             if resp.status != 200:
+                _LOGGER.warning(
+                    "Aiper %s failed: HTTP %s from %s: %s",
+                    endpoint, resp.status, url, text[:500],
+                )
                 raise AiperApiError(f"{endpoint} -> HTTP {resp.status}: {text[:200]}")
             data = _loads(text)
 
@@ -121,6 +126,10 @@ class AiperApiClient:
         success = data.get("success", code in (0, 200, "0", "200", None))
         if not success:
             msg = data.get("message") or data.get("msg") or "unknown error"
+            _LOGGER.warning(
+                "Aiper %s rejected: code=%s message=%s full=%s",
+                endpoint, code, msg, str(data)[:500],
+            )
             if code in (401, 403, 1001, 1002):
                 raise AiperAuthError(f"{endpoint}: {msg} (code {code})")
             raise AiperApiError(f"{endpoint}: {msg} (code {code})")
